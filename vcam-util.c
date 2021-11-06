@@ -29,7 +29,7 @@ const char *help =
     " -s --size    WIDTHxHEIGHT    specify resolution\n"
     " -p --pixfmt  pix_fmt         pixel format (rgb24,yuv)\n"
     " -d --device  /dev/*          control device node\n"
-    " -x --compressor FILE	   compress data\n";
+    " -x --compressor FILE	   	   compress data\n";
 
 enum ACTION { ACTION_NONE, ACTION_CREATE, ACTION_DESTROY, ACTION_MODIFY, ACTION_COMPRESSOR };
 
