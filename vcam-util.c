@@ -7,17 +7,18 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include "vcam.h"
 
-static const char *short_options = "hcm:r:ls:p:d:";
+static const char *short_options = "hcm:r:ls:p:d:x:";
 
 const struct option long_options[] = {
     {"help", 0, NULL, 'h'},   {"create", 0, NULL, 'c'},
     {"modify", 1, NULL, 'm'}, {"list", 0, NULL, 'l'},
     {"size", 1, NULL, 's'},   {"pixfmt", 1, NULL, 'p'},
     {"device", 1, NULL, 'd'}, {"remove", 1, NULL, 'r'},
-    {NULL, 0, NULL, 0}};
+    {"x_compressor", 1, NULL, 'x'}, {NULL, 0, NULL, 0}};
 
 const char *help =
     " -h --help                    print this informations\n"
@@ -27,9 +28,10 @@ const char *help =
     " -l --list                    list devices\n"
     " -s --size    WIDTHxHEIGHT    specify resolution\n"
     " -p --pixfmt  pix_fmt         pixel format (rgb24,yuv)\n"
-    " -d --device  /dev/*          control device node\n";
+    " -d --device  /dev/*          control device node\n"
+    " -x --compressor FILE	   compress data\n";
 
-enum ACTION { ACTION_NONE, ACTION_CREATE, ACTION_DESTROY, ACTION_MODIFY };
+enum ACTION { ACTION_NONE, ACTION_CREATE, ACTION_DESTROY, ACTION_MODIFY, ACTION_COMPRESSOR };
 
 struct vcam_device_spec device_template = {
     .width = 640,
@@ -39,7 +41,9 @@ struct vcam_device_spec device_template = {
     .fb_node = "",
 };
 
+char in_path[64];
 static char ctl_path[128] = "/dev/vcamctl";
+static char out_path[64] = "/dev/CompressorOut";
 
 bool parse_resolution(char *res_str, struct vcam_device_spec *dev)
 {
@@ -154,6 +158,86 @@ int list_devices()
     return 0;
 }
 
+static size_t fsize(FILE *stream)
+{
+    long begin, end;
+
+    if ((begin = ftell(stream)) == (long) -1) {
+        fprintf(stderr, "Stream is not seekable\n");
+        abort();
+    }
+
+    if (fseek(stream, 0, SEEK_END))
+        abort();
+
+    if ((end = ftell(stream)) == (long) -1)
+        abort();
+
+    if (fseek(stream, begin, SEEK_SET))
+        abort();
+
+    return (size_t) end - (size_t) begin;
+}
+
+static inline void load_layer(size_t j, FILE *stream, struct vcam_device_spec *dev)
+{
+    dev->datalayer[j].size = fsize(stream);
+    if (!(dev->datalayer[j].data = malloc(dev->datalayer[j].size))) {
+        fprintf(stderr, "Out of memory\n");
+        abort();
+    }
+
+    if (fread(dev->datalayer[j].data, 1, dev->datalayer[j].size, stream) < dev->datalayer[j].size)
+        abort();
+    fprintf(stderr, "  Input size: %" PRIu64 " bytes\n", dev->datalayer[j].size);
+}
+
+static inline void save_layer(size_t j, FILE *stream, struct vcam_device_spec *dev)
+{
+    fprintf(stderr, "  Output size: %" PRIu64 " bytes\n", dev->datalayer[j].size);
+    if (fwrite(dev->datalayer[j].data, 1, dev->datalayer[j].size, stream) < dev->datalayer[j].size)
+        abort();
+}
+
+int compressor(struct vcam_device_spec *dev)
+{
+    int fd = open(ctl_path, O_RDWR);
+    if (fd == -1) {
+        fprintf(stderr, "Failed to open %s device\n", ctl_path);
+        return -1;
+    }
+    FILE *istream;
+    FILE *ostream;
+    
+    istream = fopen(in_path, "r");
+    if(istream == NULL) {
+        fprintf(stderr, "Failed to open %s\n", in_path);
+		return -1;
+	}
+    ostream = fopen(out_path, "w+");
+    if(out_path == NULL) {
+        fprintf(stderr, "Failed to open %s\n", out_path);
+		return -1;
+	}
+    
+    load_layer(0, istream, dev);
+	if ((dev->datalayer[1].data = malloc(8 * dev->datalayer[0].size)) == NULL)
+		abort();
+    
+	fprintf(stderr, "Compressing...\n");
+    int res = ioctl(fd, VCAM_IOCTL_X_COMPRESS, dev);
+	
+	save_layer(1, ostream, dev);
+    close(fd);
+    
+    free(dev->datalayer[0].data);
+    free(dev->datalayer[1].data);
+
+    fclose(istream);
+    fclose(ostream);
+    return res;
+}
+
 int main(int argc, char *argv[])
 {
     int next_option;
@@ -161,7 +245,7 @@ int main(int argc, char *argv[])
     struct vcam_device_spec dev;
     int ret = 0;
     int tmp;
-
+	printf("srart\n");
     memset(&dev, 0x00, sizeof(struct vcam_device_spec));
 
     /* Process command line options */
@@ -207,6 +291,10 @@ int main(int argc, char *argv[])
             printf("Using device %s\n", optarg);
             strncpy(ctl_path, optarg, sizeof(ctl_path) - 1);
             break;
+        case 'x':
+			printf("iostream: %s\n", optarg);
+			strncpy(in_path, optarg, sizeof(in_path) - 1);
+			break;
         }
     } while (next_option != -1);
 
@@ -220,6 +308,9 @@ int main(int argc, char *argv[])
     case ACTION_MODIFY:
         ret = modify_device(&dev);
         break;
+    case ACTION_COMPRESSOR:
+		ret = compressor(&dev);
+		break;
     case ACTION_NONE:
         break;
     }

@@ -38,6 +38,7 @@ const char *vcam_dev_name = VCAM_DEV_NAME;
 
 static int __init vcam_init(void)
 {
+	
     int i;
     int ret = create_control_device(CONTROL_DEV_NAME);
     if (ret)
@@ -46,6 +47,8 @@ static int __init vcam_init(void)
     for (i = 0; i < create_devices; i++)
         request_vcam_device(NULL);
 
+	
+	//x_compressor(true);
 failure:
     return ret;
 }

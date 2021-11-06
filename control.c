@@ -11,6 +11,7 @@
 #include "device.h"
 #include "fb.h"
 #include "videobuf.h"
+#include "libx.h"
 
 extern unsigned short devices_max;
 
@@ -203,6 +204,20 @@ static long control_ioctl(struct file *file,
         pr_debug("Modify setting(%d)\n", dev_spec.idx);
         ret = control_iocontrol_modify_input_setting(&dev_spec);
         break;
+    case VCAM_IOCTL_X_COMPRESS: {
+		void *end;
+        pr_debug("X compress(%d)\n", dev_spec.idx);
+		x_init();
+		end = x_compress(dev_spec.datalayer[0].data, dev_spec.datalayer[0].size, dev_spec.datalayer[1].data);
+		dev_spec.datalayer[1].size = (char *) end - (char *) dev_spec.datalayer[1].data;
+       
+		if (copy_to_user((void *__user *) iocontrol_param, &dev_spec,
+						 sizeof(struct vcam_device_spec)) != 0) {
+			pr_warn("Failed to copy_to_user!");
+			ret = -1;
+		}
+		break;
+	}
     default:
         ret = -1;
     }
